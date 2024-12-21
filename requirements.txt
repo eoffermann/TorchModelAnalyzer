@@ -96,7 +96,7 @@ tifffile==2024.12.12
 tokenizers==0.21.0
 tomli==2.2.1
 tomlkit==0.13.2
-torch==2.1.2
+torch==2.2.0
 torchvision==0.16.2
 tqdm==4.67.1
 transformers==4.47.1
