@@ -1,19 +1,10 @@
-# https://github.com/eoffermann/TorchModelAnalyzer
 import torch
 import json
 import argparse
-from typing import Dict, Any
+from typing import Dict, Any, Optional
+from torch.nn import Module
 
 def describe_pth_model(file_path: str) -> Dict[str, Any]:
-    """
-    Analyzes a .pth file and returns a JSON-friendly dictionary description.
-    
-    Args:
-        file_path (str): Path to the .pth model file.
-        
-    Returns:
-        Dict[str, Any]: A dictionary describing the model file.
-    """
     try:
         data = torch.load(file_path, map_location="cpu")
     except Exception as e:
@@ -22,15 +13,14 @@ def describe_pth_model(file_path: str) -> Dict[str, Any]:
     description = {
         "file_path": file_path,
         "keys": list(data.keys()) if isinstance(data, dict) else ["state_dict"],
-        "details": {}
+        "details": {},
+        "summary": {}
     }
     
+    # Check for common keys and analyze their contents
     if isinstance(data, dict):
         if "state_dict" in data:
-            description["details"]["state_dict"] = {
-                "num_parameters": sum(p.numel() for p in data["state_dict"].values()),
-                "parameter_shapes": {k: tuple(v.shape) for k, v in data["state_dict"].items()},
-            }
+            description["details"]["state_dict"] = analyze_state_dict(data["state_dict"])
         else:
             description["details"]["state_dict"] = "Not found"
 
@@ -40,17 +30,63 @@ def describe_pth_model(file_path: str) -> Dict[str, Any]:
             }
         else:
             description["details"]["optimizer"] = "Not found"
+        
+        if "params_ema" in data:
+            description["details"]["params_ema"] = analyze_state_dict(data["params_ema"])
+        elif "params" in data:
+            description["details"]["params"] = analyze_state_dict(data["params"])
 
         for key, value in data.items():
-            if key not in ["state_dict", "optimizer"]:
-                description["details"][key] = type(value).__name__
+            if key not in ["state_dict", "optimizer", "params", "params_ema"]:
+                if isinstance(value, (int, float, str)):
+                    description["details"][key] = value
+                elif isinstance(value, dict):
+                    description["details"][key] = f"Dictionary with {len(value)} keys"
+                else:
+                    description["details"][key] = f"Type: {type(value).__name__}"
+
     else:
-        description["details"]["state_dict"] = {
-            "num_parameters": sum(p.numel() for p in data.values()),
-            "parameter_shapes": {k: tuple(v.shape) for k, v in data.items()},
-        }
+        description["details"]["model"] = describe_torch_model(data)
+    
+    description["summary"] = {
+        "num_keys": len(description["keys"]),
+        "contains_params_ema": "params_ema" in description["keys"],
+        "contains_params": "params" in description["keys"],
+        "contains_optimizer": "optimizer" in description["keys"]
+    }
     
     return description
+
+def analyze_state_dict(state_dict: Any) -> Dict[str, Any]:
+    if not isinstance(state_dict, (dict, torch.nn.ModuleDict)):
+        return {"error": "Invalid format. Expected a dictionary-like object."}
+    
+    details = {
+        "num_parameters": 0,
+        "parameter_shapes": {}
+    }
+    try:
+        details["num_parameters"] = sum(p.numel() for p in state_dict.values())
+        details["parameter_shapes"] = {k: tuple(v.shape) for k, v in state_dict.items()}
+    except Exception as e:
+        details["error"] = f"Failed to analyze state_dict: {str(e)}"
+    return details
+
+def describe_torch_model(model: Module) -> Dict[str, Any]:
+    details = {
+        "num_parameters": sum(p.numel() for p in model.parameters()),
+        "layer_names": [],
+        "num_layers": 0,
+        "module_hierarchy": []
+    }
+
+    for name, layer in model.named_modules():
+        details["module_hierarchy"].append({"name": name, "type": type(layer).__name__})
+        if len(list(layer.children())) == 0:  # Count only leaf layers
+            details["layer_names"].append(name)
+            details["num_layers"] += 1
+
+    return details
 
 def main():
     parser = argparse.ArgumentParser(
@@ -69,10 +105,8 @@ def main():
     
     args = parser.parse_args()
     
-    # Analyze the model
     model_description = describe_pth_model(args.model_path)
     
-    # Output the result
     if args.output:
         try:
             with open(args.output, "w", encoding="utf-8") as f:
