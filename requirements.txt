@@ -62,7 +62,7 @@ pandas==2.2.3
 pillow==10.4.0
 platformdirs==4.3.6
 proglog==0.1.10
-protobuf==5.29.2
+protobuf==5.29.5
 pydantic==2.10.4
 pydantic_core==2.27.2
 pydub==0.25.1
